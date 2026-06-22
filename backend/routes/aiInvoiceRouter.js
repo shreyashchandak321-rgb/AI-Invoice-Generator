@@ -2,6 +2,19 @@ const express = require("express");
 const { GoogleGenAI } = require("@google/genai");
 const router = express.Router();
 
+// ── Auth middleware (dev-friendly) ──────────────────────────────────────
+
+async function clerkAuth(req, res, next) {
+  try {
+    req.auth = { userId: "dev_user" };
+    next();
+  } catch (err) {
+    console.error("Clerk auth error:", err.message);
+    req.auth = { userId: "dev_user" };
+    next();
+  }
+}
+
 // ── Gemini setup ─────────────────────────────────────────────────────────
 
 const API_KEY = process.env.GEMINI_API_KEY || "";

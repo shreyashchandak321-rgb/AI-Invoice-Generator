@@ -1,6 +1,5 @@
 const express = require("express");
 const multer = require("multer");
-const path = require("path");
 const {
   createInvoice,
   listInvoices,
@@ -29,20 +28,11 @@ async function clerkAuth(req, res, next) {
   }
 }
 
-// ── Multer config ────────────────────────────────────────────────────────
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, path.join(__dirname, "..", "uploads")),
-  filename: (req, file, cb) => {
-    const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, `invoice-${unique}${ext}`);
-  },
-});
+// ── Multer config (memory storage for Vercel serverless) ────────────────
 
 const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith("image/")) {
       cb(null, true);

@@ -1,8 +1,5 @@
-const path = require("path");
 const mongoose = require("mongoose");
 const Invoice = require("../models/invoiceModel");
-
-const API_BASE = process.env.API_BASE || "http://localhost:4000";
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
@@ -42,9 +39,12 @@ function uploadedFilesToUrls(req) {
   Object.keys(mapping).forEach((field) => {
     const arr = req.files[field];
     if (Array.isArray(arr) && arr[0]) {
-      const filename =
-        arr[0].filename || (arr[0].path && path.basename(arr[0].path));
-      if (filename) urls[mapping[field]] = `${API_BASE}/uploads/${filename}`;
+      const file = arr[0];
+      if (file.buffer) {
+        urls[mapping[field]] = `data:${file.mimetype};base64,${file.buffer.toString("base64")}`;
+      } else if (file.filename) {
+        urls[mapping[field]] = `/uploads/${file.filename}`;
+      }
     }
   });
   return urls;

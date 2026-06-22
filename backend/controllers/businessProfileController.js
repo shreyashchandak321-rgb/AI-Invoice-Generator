@@ -1,7 +1,4 @@
-const path = require("path");
 const BusinessProfile = require("../models/businessProfileModel");
-
-const API_BASE = process.env.API_BASE || "http://localhost:4000";
 
 function uploadedFilesToUrls(req) {
   const urls = {};
@@ -11,9 +8,15 @@ function uploadedFilesToUrls(req) {
   const stampArr = req.files.stampName || req.files.stamp || [];
   const sigArr = req.files.signatureNameMeta || req.files.signature || [];
 
-  if (logoArr[0]) urls.logoUrl = `${API_BASE}/uploads/${logoArr[0].filename}`;
-  if (stampArr[0]) urls.stampUrl = `${API_BASE}/uploads/${stampArr[0].filename}`;
-  if (sigArr[0]) urls.signatureUrl = `${API_BASE}/uploads/${sigArr[0].filename}`;
+  function toDataUrl(file) {
+    if (file.buffer) return `data:${file.mimetype};base64,${file.buffer.toString("base64")}`;
+    if (file.filename) return `/uploads/${file.filename}`;
+    return null;
+  }
+
+  if (logoArr[0]) urls.logoUrl = toDataUrl(logoArr[0]);
+  if (stampArr[0]) urls.stampUrl = toDataUrl(stampArr[0]);
+  if (sigArr[0]) urls.signatureUrl = toDataUrl(sigArr[0]);
 
   return urls;
 }

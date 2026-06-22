@@ -5,20 +5,11 @@ const BusinessProfile = require("../models/businessProfileModel");
 
 const router = express.Router();
 
-// ── Multer config ────────────────────────────────────────────────────────
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, path.join(__dirname, "..", "uploads")),
-  filename: (req, file, cb) => {
-    const unique = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, `business-${unique}${ext}`);
-  },
-});
+// ── Multer config (memory storage for Vercel serverless) ────────────────
 
 const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 },
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = /jpeg|jpg|png|gif|webp/;
     const ok = allowed.test(path.extname(file.originalname).toLowerCase()) && allowed.test(file.mimetype);
@@ -69,16 +60,21 @@ router.put("/", clerkAuth, upload.fields([
       gst: gst || "",
     };
 
-    // Handle file uploads
+    // Handle file uploads (memory storage → base64 data URLs)
+    function toDataUrl(file) {
+      if (file.buffer) return `data:${file.mimetype};base64,${file.buffer.toString("base64")}`;
+      if (file.filename) return `/uploads/${file.filename}`;
+      return null;
+    }
     if (req.files) {
       if (req.files.logo && req.files.logo[0]) {
-        updateData.logoUrl = `/uploads/${req.files.logo[0].filename}`;
+        updateData.logoUrl = toDataUrl(req.files.logo[0]);
       }
       if (req.files.stamp && req.files.stamp[0]) {
-        updateData.stampUrl = `/uploads/${req.files.stamp[0].filename}`;
+        updateData.stampUrl = toDataUrl(req.files.stamp[0]);
       }
       if (req.files.signature && req.files.signature[0]) {
-        updateData.signatureUrl = `/uploads/${req.files.signature[0].filename}`;
+        updateData.signatureUrl = toDataUrl(req.files.signature[0]);
       }
     }
 

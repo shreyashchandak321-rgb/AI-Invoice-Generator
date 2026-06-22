@@ -10,9 +10,8 @@ const businessProfileRouter = require("./routes/businessProfileRouter");
 const aiInvoiceRouter = require("./routes/aiInvoiceRouter");
 
 const app = express();
-const PORT = process.env.PORT || 4000;
 
-// Ensure uploads directory exists
+// Ensure uploads directory exists (local dev only)
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
@@ -28,7 +27,7 @@ app.use(
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Serve uploaded files statically
+// Serve uploaded files statically (local dev only)
 app.use("/uploads", express.static(uploadsDir));
 
 // Routes
@@ -47,16 +46,26 @@ app.use((err, req, res, next) => {
   res.status(500).json({ success: false, message: "Internal server error" });
 });
 
-// Connect to MongoDB and start server
-mongoose
-  .connect(process.env.MONGODB_URI)
-  .then(() => {
-    console.log("Connected to MongoDB");
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
+// MongoDB connection (reusable for serverless + local dev)
+async function connectDB() {
+  if (mongoose.connection.readyState >= 1) return;
+  await mongoose.connect(process.env.MONGODB_URI);
+  console.log("Connected to MongoDB");
+}
+
+// Auto-start for local dev only (not when imported by Vercel)
+if (require.main === module) {
+  const PORT = process.env.PORT || 4000;
+  connectDB()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+      });
+    })
+    .catch((err) => {
+      console.error("MongoDB connection error:", err);
+      process.exit(1);
     });
-  })
-  .catch((err) => {
-    console.error("MongoDB connection error:", err);
-    process.exit(1);
-  });
+}
+
+module.exports = { app, connectDB };
