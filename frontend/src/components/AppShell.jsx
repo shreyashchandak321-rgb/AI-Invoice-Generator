@@ -1,281 +1,289 @@
+import { Link, useLocation, Outlet } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useUser, useClerk } from "@clerk/clerk-react";
+import { FiHome, FiFileText, FiPlus, FiUser, FiChevronRight, FiChevronLeft, FiLogOut } from "react-icons/fi";
+import { appShellStyles as s } from "../assets/dummyStyles";
 
+const navItems = [
+  { label: "Dashboard", path: "/", icon: FiHome },
+  { label: "Invoices", path: "/invoices", icon: FiFileText },
+  { label: "Create Invoice", path: "/create-invoice", icon: FiPlus },
+  { label: "Business Profile", path: "/business-profile", icon: FiUser },
+];
 
-  // Check screen size for responsive behavior
+export default function AppShell() {
+  const location = useLocation();
+  const { user } = useUser();
+  const { signOut } = useClerk();
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+
+  const displayName =
+    user?.fullName || user?.firstName || user?.username || "there";
+  const email = user?.primaryEmailAddress?.emailAddress || "";
+  const initial = (displayName?.[0] || "U").toUpperCase();
+
+  function handleLogout() {
+    signOut({ redirectUrl: "/sign-in" });
+  }
+
   useEffect(() => {
-    const checkScreenSize = () => {
-      setIsMobile(window.innerWidth < 1024);
-      if (window.innerWidth < 1024) setCollapsed(false);
-    };
-    checkScreenSize();
-    window.addEventListener("resize", checkScreenSize);
-    return () => window.removeEventListener("resize", checkScreenSize);
+    const onScroll = () => setScrolled(window.scrollY > 10);
+    window.addEventListener("scroll", onScroll);
+    return () => window.removeEventListener("scroll", onScroll);
   }, []);
 
   useEffect(() => {
-    try {
-      localStorage.setItem("sidebar_collapsed", collapsed ? "true" : "false");
-    } catch {}
-  }, [collapsed]);
+    setMobileOpen(false);
+  }, [location.pathname]);
 
-  // Lock body scroll when mobile drawer is open
-  useEffect(() => {
-    document.body.style.overflow = mobileOpen ? "hidden" : "";
-    return () => {
-      document.body.style.overflow = "";
-    };
-  }, [mobileOpen]);
+  return (
+    <div className={s.root}>
+      <div className={s.layout}>
+        {/* ── Desktop Sidebar ── */}
+        <aside
+          className={`${s.sidebar} ${
+            collapsed ? s.sidebarCollapsed : s.sidebarExpanded
+          }`}
+          style={{ height: "100vh", position: "sticky", top: 0 }}
+        >
+          <div className={s.sidebarGradient} />
+          <div className={s.sidebarContainer}>
+            {/* Logo */}
+            <div>
+              <div
+                className={`${s.logoContainer} ${
+                  collapsed ? s.logoContainerCollapsed : ""
+                }`}
+              >
+                <Link to="/" className={s.logoLink}>
+                  <span className="text-3xl">📄</span>
+                  {!collapsed && (
+                    <span className={s.logoText}>InvoiceAI</span>
+                  )}
+                </Link>
+              </div>
 
-  // Header scroll effect
-  useEffect(() => {
-    const handleScroll = () => setScrolled(window.scrollY > 10);
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
+              {!collapsed && (
+                <div className={s.logoUnderline} style={{ width: "100%" }} />
+              )}
 
-  const displayName = (() => {
-    if (!user) return "User";
-    const name = user.fullName || user.firstName || user.username || "";
-    return name.trim() || (user.email || "").split?.("@")?.[0] || "User";
-  })();
+              {/* Nav */}
+              <nav className={`${s.nav} mt-8`}>
+                {navItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = location.pathname === item.path;
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      className={`${s.sidebarLink} ${
+                        collapsed ? s.sidebarLinkCollapsed : ""
+                      } ${
+                        isActive ? s.sidebarLinkActive : s.sidebarLinkInactive
+                      }`}
+                    >
+                      <Icon
+                        className={`${s.sidebarIcon} ${
+                          isActive
+                            ? s.sidebarIconActive
+                            : s.sidebarIconInactive
+                        }`}
+                        size={20}
+                      />
+                      {!collapsed && (
+                        <span className={s.sidebarText}>{item.label}</span>
+                      )}
+                      {isActive && !collapsed && (
+                        <div className={s.sidebarActiveIndicator} />
+                      )}
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
 
-  const firstName = () => {
-    const parts = displayName.split(" ").filter(Boolean);
-    return parts.length ? parts[0] : displayName;
-  };
+            {/* User area */}
+            <div className={s.userSection}>
+              <div
+                className={`${s.userDivider} ${
+                  collapsed ? s.userDividerCollapsed : s.userDividerExpanded
+                }`}
+              />
+              {!collapsed && (
+                <div className="flex items-center gap-3 px-3 py-3 mb-2">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-sm font-semibold shadow-lg">
+                    {initial}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-gray-900 truncate">
+                      {displayName}
+                    </div>
+                    <div className="text-xs text-gray-500 truncate">
+                      {email}
+                    </div>
+                  </div>
+                </div>
+              )}
+              <button
+                onClick={handleLogout}
+                className={`${s.logoutButton} ${
+                  collapsed ? "justify-center" : ""
+                }`}
+              >
+                <FiLogOut className={s.logoutIcon} size={18} />
+                {!collapsed && <span>Logout</span>}
+              </button>
+            </div>
 
-  const initials = () => {
-    const parts = displayName.split(" ").filter(Boolean);
-    if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
-    return (
-      parts[0].charAt(0) + parts[parts.length - 1].charAt(0)
-    ).toUpperCase();
-  };
-  /* ----- Icons (kept as you had) ----- */
-  const DashboardIcon = ({ className = "w-5 h-5" }) => (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-    >
-      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-      <polyline points="9 22 9 12 15 12 15 22" />
-    </svg>
-  );
+            {/* Collapse toggle */}
+            <div className={s.collapseSection}>
+              <button
+                onClick={() => setCollapsed(!collapsed)}
+                className={`${s.collapseButtonInner} ${
+                  collapsed ? "w-10 justify-center" : ""
+                }`}
+              >
+                {collapsed ? (
+                  <FiChevronRight size={16} />
+                ) : (
+                  <>
+                    <FiChevronLeft size={16} />
+                    <span>Collapse</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </aside>
 
-  const InvoiceIcon = ({ className = "w-5 h-5" }) => (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-    >
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14 2 14 8 20 8" />
-      <line x1="16" y1="13" x2="8" y2="13" />
-      <line x1="16" y1="17" x2="8" y2="17" />
-      <polyline points="10 9 9 9 8 9" />
-    </svg>
-  );
+        {/* ── Mobile Sidebar ── */}
+        {mobileOpen && (
+          <div className={s.mobileOverlay}>
+            <div
+              className={s.mobileBackdrop}
+              onClick={() => setMobileOpen(false)}
+            />
+            <div className={s.mobileSidebar}>
+              <div className={s.mobileHeader}>
+                <Link
+                  to="/"
+                  className={s.mobileLogoLink}
+                  onClick={() => setMobileOpen(false)}
+                >
+                  <span className="text-2xl">📄</span>
+                  <span className={s.mobileLogoText}>InvoiceAI</span>
+                </Link>
+                <button
+                  onClick={() => setMobileOpen(false)}
+                  className={s.mobileCloseButton}
+                >
+                  ✕
+                </button>
+              </div>
+              <nav className={s.mobileNav}>
+                {navItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = location.pathname === item.path;
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      className={`${s.mobileNavLink} ${
+                        isActive
+                          ? s.mobileNavLinkActive
+                          : s.mobileNavLinkInactive
+                      }`}
+                      onClick={() => setMobileOpen(false)}
+                    >
+                      <Icon size={20} />
+                      <span>{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
+              <div className={s.mobileLogoutSection}>
+                <button onClick={handleLogout} className={s.mobileLogoutButton}>
+                  <FiLogOut size={18} />
+                  <span>Logout</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
-  const CreateIcon = ({ className = "w-5 h-5" }) => (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-    >
-      <circle cx="12" cy="12" r="10" />
-      <line x1="12" y1="8" x2="12" y2="16" />
-      <line x1="8" y1="12" x2="16" y2="12" />
-    </svg>
-  );
-
-  const ProfileIcon = ({ className = "w-5 h-5" }) => (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-    >
-      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-      <circle cx="12" cy="7" r="4" />
-    </svg>
-  );
-
-  const LogoutIcon = ({ className = "w-5 h-5" }) => (
-    <svg
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-    >
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-      <polyline points="16 17 21 12 16 7" />
-      <line x1="21" y1="12" x2="9" y2="12" />
-    </svg>
-  );
-
-  const CollapseIcon = ({ className = "w-4 h-4", collapsed }) => (
-    <svg
-      className={`${className} transition-transform duration-300 ${
-        collapsed ? "rotate-180" : ""
-      }`}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        d="M11 19l-7-7 7-7m8 14l-7-7 7-7"
-      />
-    </svg>
-  );
-
-  /* ----- SidebarLink ----- */
-  const SidebarLink = ({ to, icon, children }) => (
-    <NavLink
-      to={to}
-      className={({ isActive }) => `
-        ${appShellStyles.sidebarLink}
-        ${collapsed ? appShellStyles.sidebarLinkCollapsed : ""}
-        ${
-          isActive
-            ? appShellStyles.sidebarLinkActive
-            : appShellStyles.sidebarLinkInactive
-        }
-      `}
-      onClick={() => setMobileOpen(false)}
-    >
-      {({ isActive }) => (
-        <>
-          <div
-            className={`${appShellStyles.sidebarIcon} ${
-              isActive
-                ? appShellStyles.sidebarIconActive
-                : appShellStyles.sidebarIconInactive
+        {/* ── Main Area ── */}
+        <div className="flex-1 min-h-screen flex flex-col">
+          {/* Header */}
+          <header
+            className={`${s.header} ${
+              scrolled ? s.headerScrolled : s.headerNotScrolled
             }`}
           >
-            {icon}
-          </div>
-          {!collapsed && (
-            <span className={appShellStyles.sidebarText}>{children}</span>
-          )}
-          {!collapsed && isActive && (
-            <div className={appShellStyles.sidebarActiveIndicator} />
-          )}
-        </>
-      )}
-    </NavLink>
+            <div className={s.headerTopSection}>
+              <div className={s.headerContent}>
+                <button
+                  onClick={() => setMobileOpen(true)}
+                  className={s.mobileMenuButton}
+                >
+                  <span className={s.mobileMenuIcon}>☰</span>
+                </button>
+                <button
+                  onClick={() => setCollapsed(!collapsed)}
+                  className={s.desktopCollapseButton}
+                >
+                  {collapsed ? (
+                    <FiChevronRight size={18} />
+                  ) : (
+                    <FiChevronLeft size={18} />
+                  )}
+                </button>
+                <div className={s.welcomeContainer}>
+                  <h1 className={s.welcomeTitle}>
+                    Welcome back,{" "}
+                    <span className={s.welcomeName}>{displayName}!</span>
+                  </h1>
+                  <p className={s.welcomeSubtitle}>
+                    Ready to create amazing invoices?
+                  </p>
+                </div>
+              </div>
+              <div className={s.mobileUserAvatar}>
+                <div className={s.mobileAvatar}>{initial}</div>
+              </div>
+            </div>
+
+            <div className={s.headerActions}>
+              <Link to="/create-invoice" className={s.ctaButton}>
+                <FiPlus className={s.ctaIcon} size={18} />
+                <span>Create</span>
+                <div className={s.ctaArrow} />
+              </Link>
+              <div className={s.userSectionDesktop}>
+                <div className={s.userInfo}>
+                  <div className={s.userName}>{displayName}</div>
+                  <div className={s.userEmail}>{email}</div>
+                </div>
+                <div className={s.userAvatarContainer}>
+                  <div className={s.userAvatar}>
+                    <div className={s.userAvatarBorder} />
+                    {initial}
+                  </div>
+                  <div className={s.userStatus} />
+                </div>
+              </div>
+            </div>
+          </header>
+
+          {/* Page Content */}
+          <main className={s.main}>
+            <div className={s.mainContainer}>
+              <Outlet />
+            </div>
+          </main>
+        </div>
+      </div>
+    </div>
   );
-
-
-
-
-              <nav className={appShellStyles.nav}>
-                <SidebarLink to="/app/dashboard" icon={<DashboardIcon />}>
-                  Dashboard
-                </SidebarLink>
-                <SidebarLink to="/app/invoices" icon={<InvoiceIcon />}>
-                  Invoices
-                </SidebarLink>
-                <SidebarLink to="/app/create-invoice" icon={<CreateIcon />}>
-                  Create Invoice
-                </SidebarLink>
-                <SidebarLink to="/app/business" icon={<ProfileIcon />}>
-                  Business Profile
-                </SidebarLink>
-              </nav>
-
-
-
-
-        {/* Mobile Sidebar */}
-                  <svg
-                    className={appShellStyles.mobileCloseIcon}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-
-
-                      <nav className={appShellStyles.mobileNav}>
-                <NavLink
-                  onClick={() => setMobileOpen(false)}
-                  to="/app/dashboard"
-                  className={({ isActive }) =>
-                    `${appShellStyles.mobileNavLink} ${
-                      isActive
-                        ? appShellStyles.mobileNavLinkActive
-                        : appShellStyles.mobileNavLinkInactive
-                    }`
-                  }
-                >
-                  {" "}
-                  <DashboardIcon /> Dashboard
-                </NavLink>
-                <NavLink
-                  onClick={() => setMobileOpen(false)}
-                  to="/app/invoices"
-                  className={({ isActive }) =>
-                    `${appShellStyles.mobileNavLink} ${
-                      isActive
-                        ? appShellStyles.mobileNavLinkActive
-                        : appShellStyles.mobileNavLinkInactive
-                    }`
-                  }
-                >
-                  {" "}
-                  <InvoiceIcon /> Invoices
-                </NavLink>
-                <NavLink
-                  onClick={() => setMobileOpen(false)}
-                  to="/app/create-invoice"
-                  className={({ isActive }) =>
-                    `${appShellStyles.mobileNavLink} ${
-                      isActive
-                        ? appShellStyles.mobileNavLinkActive
-                        : appShellStyles.mobileNavLinkInactive
-                    }`
-                  }
-                >
-                  {" "}
-                  <CreateIcon /> Create Invoice
-                </NavLink>
-                <NavLink
-                  onClick={() => setMobileOpen(false)}
-                  to="/app/business"
-                  className={({ isActive }) =>
-                    `${appShellStyles.mobileNavLink} ${
-                      isActive
-                        ? appShellStyles.mobileNavLinkActive
-                        : appShellStyles.mobileNavLinkInactive
-                    }`
-                  }
-                >
-                  {" "}
-                  <ProfileIcon /> Business Profile
-                </NavLink>
-              </nav>
-
-             
-                  <svg
-                    className={appShellStyles.mobileMenuIcon}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M4 6h16M4 12h16M4 18h16" />
-                  </svg>
-            
+}

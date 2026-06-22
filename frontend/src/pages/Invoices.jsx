@@ -1,12 +1,12 @@
-import React, { useMemo, useState, useEffect, useCallback } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import StatusBadge from "../components/StatusBadge";
 import AiInvoiceModal from "../components/AiInvoiceModal";
+import ConfirmModal from "../components/ConfirmModal";
 import GeminiIcon from "../components/GeminiIcon";
 import { useNavigate } from "react-router-dom";
 import { invoicesStyles } from "../assets/dummyStyles";
-import { useAuth } from "@clerk/clerk-react";
-
-const API_BASE = "http://localhost:4000";
+import { useSafeAuth } from "../hooks/useSafeAuth";
+import { API_BASE } from "../config";
 
 /* ---------- helpers ---------- */
 /* ----------------- frontend-only: normalize image URLs ----------------- */
@@ -28,7 +28,7 @@ function resolveImageUrl(url) {
         return `${API_BASE.replace(/\/+$/, "")}${path}`;
       }
       return parsed.href;
-    } catch (e) {
+    } catch {
       // fall through to relative handling
     }
   }
@@ -38,7 +38,7 @@ function resolveImageUrl(url) {
 }
 
 function normalizeInvoiceFromServer(inv = {}) {
-  const id = inv.invoiceNumber || inv.id || inv._id || String(inv._id || "");
+  const id = inv._id || inv.id || String(inv._id || "");
   const amount =
     inv.total ??
     inv.amount ??
@@ -243,7 +243,7 @@ function uid() {
 /* ---------- Component ---------- */
 export default function InvoicesPage() {
   const navigate = useNavigate();
-  const { getToken, isSignedIn } = useAuth();
+  const { getToken, isSignedIn } = useSafeAuth();
 
   // helper to obtain token (with a forceRefresh retry)
   const obtainToken = useCallback(async () => {
@@ -276,6 +276,9 @@ export default function InvoicesPage() {
 
   // AI modal
   const [aiOpen, setAiOpen] = useState(false);
+
+  // confirm delete modal
+  const [confirmDelete, setConfirmDelete] = useState({ open: false, invoice: null });
   const [aiLoading, setAiLoading] = useState(false);
 
   // fetch invoices from backend (auth-aware)
@@ -407,18 +410,23 @@ export default function InvoicesPage() {
 
   function openInvoice(inv) {
     const found = allInvoices.find((x) => x && x.id === inv.id) || inv;
-    navigate(`/app/invoices/${inv.id}/preview`, { state: { invoice: found } });
+    navigate(`/invoices/${inv.id}/preview`, { state: { invoice: found } });
   }
 
   // delete invoice (backend)
   async function handleDeleteInvoice(inv) {
     if (!inv?.id) return;
-    if (!confirm(`Delete invoice ${inv.id}? This cannot be undone.`)) return;
+    setConfirmDelete({ open: true, invoice: inv });
+  }
+
+  async function confirmDeleteInvoice() {
+    const inv = confirmDelete.invoice;
+    if (!inv?.id) return;
     try {
       const token = await obtainToken();
       if (!token) {
         alert("Delete requires authentication. Please sign in.");
-        navigate("/login");
+        navigate("/sign-in");
         return;
       }
       const res = await fetch(
@@ -430,7 +438,7 @@ export default function InvoicesPage() {
       );
       if (res.status === 401) {
         alert("Unauthorized. Please sign in.");
-        navigate("/login");
+        navigate("/sign-in");
         return;
       }
       if (!res.ok) {
@@ -469,7 +477,7 @@ export default function InvoicesPage() {
         let bodyJson = null;
         try {
           bodyJson = bodyText ? JSON.parse(bodyText) : null;
-        } catch (e) {
+        } catch {
           bodyJson = null;
         }
 
@@ -539,7 +547,7 @@ export default function InvoicesPage() {
           );
           await fetchInvoices();
           setAiOpen(false);
-          navigate(`/app/invoices/${saved.id}/edit`, {
+          navigate(`/invoices/${saved.id}/edit`, {
             state: { invoice: saved },
           });
           return;
@@ -580,7 +588,7 @@ export default function InvoicesPage() {
 
       setAllInvoices((prev) => [newInvoice, ...(prev || [])]);
       setAiOpen(false);
-      navigate(`/app/invoices/${newId}/edit`, {
+      navigate(`/invoices/${newId}/edit`, {
         state: { invoice: newInvoice },
       });
     } finally {
@@ -617,7 +625,7 @@ export default function InvoicesPage() {
 
           <button
             type="button"
-            onClick={() => navigate("/app/create-invoice")}
+            onClick={() => navigate("/create-invoice")}
             className={invoicesStyles.createButton}
           >
             <PlusIcon className="w-4 h-4" />
@@ -1016,7 +1024,7 @@ export default function InvoicesPage() {
                       </p>
                       <button
                         type="button"
-                        onClick={() => navigate("/app/create-invoice")}
+                        onClick={() => navigate("/create-invoice")}
                         className={invoicesStyles.emptyStateAction}
                       >
                         Create your first invoice
@@ -1053,6 +1061,17 @@ export default function InvoicesPage() {
         onClose={() => setAiOpen(false)}
         onGenerate={handleGenerateFromAI}
         initialText=""
+      />
+
+      {/* Confirm delete modal */}
+      <ConfirmModal
+        open={confirmDelete.open}
+        onClose={() => setConfirmDelete({ open: false, invoice: null })}
+        onConfirm={confirmDeleteInvoice}
+        title="Delete Invoice"
+        message={`Delete invoice ${confirmDelete.invoice?.id || ""}? This cannot be undone.`}
+        confirmLabel="Delete"
+        danger
       />
     </div>
   );

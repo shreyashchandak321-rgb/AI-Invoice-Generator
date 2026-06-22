@@ -511,7 +511,6 @@ export const invoicesStyles = {
   // Table Section
   tableCard: "bg-white/80 backdrop-blur-xl rounded-2xl border border-gray-200/60 shadow-sm overflow-hidden",
   tableHeader: "px-6 py-5 border-b border-gray-200/60",
-  tableHeaderContent: "flex items-center justify-between",
   tableTitle: "text-lg font-semibold text-gray-900",
   tableSubtitle: "text-sm text-gray-600 mt-1",
   tableSubtitleBold: "font-medium text-gray-900",

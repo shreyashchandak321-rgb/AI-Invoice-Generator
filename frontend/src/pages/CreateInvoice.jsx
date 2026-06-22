@@ -1,15 +1,13 @@
-import React, { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
-import { useAuth } from "@clerk/clerk-react";
+import { useSafeAuth } from "../hooks/useSafeAuth";
 import StatusBadge from "../components/StatusBadge";
 import {
   createInvoiceStyles,
   createInvoiceIconColors,
   createInvoiceCustomStyles,
 } from "../assets/dummyStyles";
-
-/* ---------- API BASE ---------- */
-const API_BASE = "http://localhost:4000";
+import { API_BASE } from "../config";
 
 /* ---------- storage helpers (unchanged) ---------- */
 /* ----------------- frontend-only: normalize image URLs ----------------- */
@@ -31,7 +29,7 @@ function resolveImageUrl(url) {
         return `${API_BASE.replace(/\/+$/, "")}${path}`;
       }
       return parsed.href;
-    } catch (e) {
+    } catch {
       // fall through to relative handling
     }
   }
@@ -191,7 +189,7 @@ export default function CreateInvoice() {
   const isEditing = Boolean(id && id !== "new");
 
   // Clerk auth hooks
-  const { getToken, isSignedIn } = useAuth();
+  const { getToken, isSignedIn } = useSafeAuth();
 
   // helper to obtain token with a retry
   const obtainToken = useCallback(async () => {
@@ -757,7 +755,7 @@ export default function CreateInvoice() {
       saveStoredInvoices(all);
 
       alert(`Invoice ${isEditing ? "updated" : "created"} successfully.`);
-      navigate("/app/invoices");
+      navigate("/invoices");
     } catch (err) {
       console.error("Failed to save invoice to server:", err);
 
@@ -797,7 +795,7 @@ export default function CreateInvoice() {
         }
         saveStoredInvoices(all);
         alert("Saved locally as fallback (server error).");
-        navigate("/app/invoices");
+        navigate("/invoices");
       } catch (localErr) {
         console.error("Local fallback failed:", localErr);
         alert(err?.message || "Save failed. See console.");
@@ -815,7 +813,7 @@ export default function CreateInvoice() {
       tax: computeTotals(items, invoice.taxPercent).tax,
       total: computeTotals(items, invoice.taxPercent).total,
     };
-    navigate(`/app/invoices/${invoice.id}/preview`, {
+    navigate(`/invoices/${invoice.id}/preview`, {
       state: { invoice: prepared },
     });
   }

@@ -1,367 +1,305 @@
-/* normalize client object */
-function normalizeClient(raw) {
-  if (!raw) return { name: "", email: "", address: "", phone: "" };
-  if (typeof raw === "string")
-    return { name: raw, email: "", address: "", phone: "" };
-  if (typeof raw === "object") {
-    return {
-      name: raw.name ?? raw.company ?? raw.client ?? "",
-      email: raw.email ?? raw.emailAddress ?? "",
-      address: raw.address ?? "",
-      phone: raw.phone ?? raw.contact ?? "",
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { dashboardStyles as s, kpiCardStyles as k } from "../assets/dummyStyles";
+import { FaFileInvoiceDollar, FaIndianRupeeSign, FaClock } from "react-icons/fa6";
+import { API_BASE } from "../config";
+
+const kpiCards = [
+  {
+    label: "TOTAL INVOICES",
+    icon: FaFileInvoiceDollar,
+    iconBg: "bg-blue-100",
+    iconColor: "text-blue-600",
+    trend: "8.5%",
+    trendUp: true,
+    subtitle: "Active invoices",
+    getValue: (invoices) => invoices.length,
+  },
+  {
+    label: "TOTAL PAID",
+    icon: FaIndianRupeeSign,
+    iconBg: "bg-green-100",
+    iconColor: "text-green-600",
+    trend: "12.2%",
+    trendUp: true,
+    subtitle: "Received amount (INR)",
+    getValue: (invoices) => {
+      const total = invoices
+        .filter((i) => i.status === "paid")
+        .reduce((sum, i) => sum + (i.totalAmount || 0), 0);
+      return `₹${total.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
+    },
+  },
+  {
+    label: "TOTAL UNPAID",
+    icon: FaClock,
+    iconBg: "bg-orange-100",
+    iconColor: "text-orange-500",
+    trend: "3.1%",
+    trendUp: false,
+    subtitle: "Outstanding balance (INR)",
+    getValue: (invoices) => {
+      const total = invoices
+        .filter((i) => i.status !== "paid")
+        .reduce((sum, i) => sum + (i.totalAmount || 0), 0);
+      return `₹${total.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`;
+    },
+  },
+];
+
+export default function Dashboard() {
+  const [invoices, setInvoices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const fetchInvoices = async () => {
+      try {
+        const token = await window.__clerk?.session?.getToken();
+        const res = await fetch(`${API_BASE}/api/invoices`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        const data = await res.json();
+        if (data.success) setInvoices(data.data);
+      } catch (err) {
+        console.error("Failed to fetch invoices:", err);
+      } finally {
+        setLoading(false);
+      }
     };
-  }
-  return { name: "", email: "", address: "", phone: "" };
-}
+    fetchInvoices();
+  }, []);
 
-function currencyFmt(amount = 0, currency = "INR") {
-  try {
-    const n = Number(amount || 0);
-    if (currency === "INR")
-      return new Intl.NumberFormat("en-IN", {
-        style: "currency",
-        currency: "INR",
-      }).format(n);
-    return new Intl.NumberFormat(undefined, {
-      style: "currency",
-      currency,
-    }).format(n);
-  } catch {
-    return `${currency} ${amount}`;
-  }
-}
+  const paidCount = invoices.filter((i) => i.status === "paid").length;
+  const paidRate = invoices.length ? Math.round((paidCount / invoices.length) * 100) : 0;
+  const avgInvoice = invoices.length
+    ? invoices.reduce((sum, i) => sum + (i.totalAmount || 0), 0) / invoices.length
+    : 0;
 
-/* helpers to format icons */
-const TrendingUpIcon = ({ className = "w-5 h-5" }) => (
-  <svg
-    className={className}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-  >
-    <path d="M23 6l-9.5 9.5-5-5L1 18" />
-    <path d="M17 6h6v6" />
-  </svg>
-);
-const DollarIcon = ({ className = "w-5 h-5" }) => (
-  <svg
-    className={className}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-  >
-    <line x1="12" y1="1" x2="12" y2="23" />
-    <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-  </svg>
-);
-const ClockIcon = ({ className = "w-5 h-5" }) => (
-  <svg
-    className={className}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-  >
-    <circle cx="12" cy="12" r="10" />
-    <polyline points="12 6 12 12 16 14" />
-  </svg>
-);
-const BrainIcon = ({ className = "w-5 h-5" }) => (
-  <svg
-    className={className}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-  >
-    <path d="M9.5 14.5A2.5 2.5 0 0 1 7 12c0-1.38.5-2 1-3 1.072-2.143 2.928-3.25 4.5-3 1.572.25 3 2 3 4 0 1.5-.5 2.5-1 3.5-1 2-2 3-3.5 3-1.5 0-2.5-1.5-2.5-3Z" />
-    <path d="M14.5 9.5A2.5 2.5 0 0 1 17 12c0 1.38-.5 2-1 3-1.072 2.143-2.928 3.25-4.5 3-1.572-.25-3-2-3-4 0-1.5.5-2.5 1-3.5 1-2 2-3 3.5-3 1.5 0 2.5 1.5 2.5 3Z" />
-  </svg>
-);
-const FileTextIcon = ({ className = "w-5 h-5" }) => (
-  <svg
-    className={className}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-  >
-    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-    <polyline points="14 2 14 8 20 8" />
-    <line x1="16" y1="13" x2="8" y2="13" />
-    <line x1="16" y1="17" x2="8" y2="17" />
-    <polyline points="10 9 9 9 8 9" />
-  </svg>
-);
-const EyeIcon = ({ className = "w-4 h-4" }) => (
-  <svg
-    className={className}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-  >
-    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-    <circle cx="12" cy="12" r="3" />
-  </svg>
-);
+  return (
+    <div className={s.pageContainer}>
+      {/* Page Header */}
+      <div className={s.headerContainer}>
+        <h1 className={s.headerTitle}>Dashboard Overview</h1>
+        <p className={s.headerSubtitle}>
+          Track your invoicing performance and business insights
+        </p>
+      </div>
 
-/* small helpers */
-function capitalize(s) {
-  if (!s) return s;
-  return String(s).charAt(0).toUpperCase() + String(s).slice(1);
-}
-
-/* ---------- date formatting helper: DD/MM/YYYY ---------- */
-function formatDate(dateInput) {
-  if (!dateInput) return "—";
-  const d = dateInput instanceof Date ? dateInput : new Date(String(dateInput));
-  if (Number.isNaN(d.getTime())) return "—";
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
-}
-
-/* ---------- Component (fetch from backend) ---------- */
-      if (res.status === 401) {
-        // unauthorized - prompt login
-        setError("Unauthorized. Please sign in.");
-        setStoredInvoices([]);
-        return;
-      }
-
-      if (!res.ok) {
-        const msg = json?.message || `Failed to fetch (${res.status})`;
-        throw new Error(msg);
-      }
-
-      const raw = json?.data || [];
-      const mapped = (Array.isArray(raw) ? raw : []).map((inv) => {
-        const clientObj = inv.client ?? {};
-        const amountVal = Number(inv.total ?? inv.amount ?? 0);
-        const currency = (inv.currency || "INR").toUpperCase();
-
-        return {
-          ...inv,
-          id: inv.invoiceNumber || inv._id || String(inv._id || ""),
-          client: clientObj,
-          amount: amountVal,
-          currency,
-          // keep status normalized
-          status:
-            typeof inv.status === "string"
-              ? capitalize(inv.status)
-              : inv.status || "Draft",
-        };
-      });
-      setStoredInvoices(mapped);
-    } catch (err) {
-      console.error("Failed to fetch invoices:", err);
-      setError(err?.message || "Failed to load invoices");
-      setStoredInvoices([]);
-    } 
-
-    
-  // fetch user's business profile (if authenticated)
-  const fetchBusinessProfile = useCallback(async () => {
-    try {
-
-      if (res.status === 401) {
-        // silently ignore; profile not available
-        return;
-      }
-      if (!res.ok) return;
-      const json = await res.json().catch(() => null);
-      const data = json?.data || null;
-      if (data) setBusinessProfile(data);
-    } catch (err) {
-      // non-fatal
-      console.warn("Failed to fetch business profile:", err);
-    }
-  }, [obtainToken]);
-
-
-  
-  const HARD_RATES = {
-    USD_TO_INR: 83, 
-  };
-
-  function convertToINR(amount = 0, currency = "INR") {
-    const n = Number(amount || 0);
-    const curr = String(currency || "INR")
-      .trim()
-      .toUpperCase();
-
-    if (curr === "INR") return n;
-    if (curr === "USD") return n * HARD_RATES.USD_TO_INR;
-    return n;
-  }
-
-  const kpis = useMemo(() => {
-    const totalInvoices = storedInvoices.length;
-    let totalPaid = 0; // in INR
-    let totalUnpaid = 0; // in INR
-    let paidCount = 0;
-    let unpaidCount = 0;
-
-    storedInvoices.forEach((inv) => {
-      const rawAmount =
-        typeof inv.amount === "number"
-          ? inv.amount
-          : Number(inv.total ?? inv.amount ?? 0);
-      const invCurrency = inv.currency || "INR";
-      const amtInINR = convertToINR(rawAmount, invCurrency);
-
-      if (inv.status === "Paid") {
-        totalPaid += amtInINR;
-        paidCount++;
-      }
-      if (inv.status === "Unpaid" || inv.status === "Overdue") {
-        totalUnpaid += amtInINR;
-        unpaidCount++;
-      }
-    });
-
-    const totalAmount = totalPaid + totalUnpaid;
-    const paidPercentage =
-      totalAmount > 0 ? (totalPaid / totalAmount) * 100 : 0;
-    const unpaidPercentage =
-      totalAmount > 0 ? (totalUnpaid / totalAmount) * 100 : 0;
-
-    return {
-      totalInvoices,
-      totalPaid,
-      totalUnpaid,
-      paidCount,
-      unpaidCount,
-      paidPercentage,
-      unpaidPercentage,
-    };
-  }, [storedInvoices]);
-
-
-  const recent = useMemo(() => {
-    return storedInvoices
-      .slice()
-      .sort(
-        (a, b) =>
-          (Date.parse(b.issueDate || 0) || 0) -
-          (Date.parse(a.issueDate || 0) || 0)
-      )
-      .slice(0, 5);
-  }, [storedInvoices]);
-
-
-  const getClientName = (inv) => {
-    if (!inv) return "";
-    if (typeof inv.client === "string") return inv.client;
-    if (typeof inv.client === "object")
-      return inv.client?.name || inv.client?.company || inv.company || "";
-    return inv.company || "Client";
-  };
-
-  const getClientInitial = (inv) => {
-    const clientName = getClientName(inv);
-    return clientName ? clientName.charAt(0).toUpperCase() : "C";
-  };
-
-  function openInvoice(invRow) {
-    const payload = invRow;
-    navigate(`/app/invoices/${invRow.id}`, { state: { invoice: payload } });
-  }
-
-
-
-
-                    <svg
-                      className="w-4 h-4"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                    >
-                      <path d="M12 5v14m-7-7h14" />
-                    </svg>
-                
-
-     <div className={dashboardStyles.cardContainer}>
-            <div className="p-6">
-              <h3 className="font-semibold text-gray-900 mb-4">
-                Quick Actions
-              </h3>
-              <div className={dashboardStyles.quickActionsContainer}>
-                <button
-                  onClick={() => navigate("/app/create-invoice")}
-                  className={`${dashboardStyles.quickActionButton} ${dashboardStyles.quickActionBlue}`}
-                >
-                  <div
-                    className={`${dashboardStyles.quickActionIconContainer} ${dashboardStyles.quickActionIconBlue}`}
-                  >
-                    <svg
-                      className="w-4 h-4"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                    >
-                      <path d="M12 5v14m-7-7h14" />
-                    </svg>
+      {/* KPI Cards */}
+      <div className={s.kpiGrid}>
+        {kpiCards.map((card, i) => {
+          const Icon = card.icon;
+          const value = card.getValue(invoices);
+          return (
+            <div key={i} className={k.cardContainer}>
+              <div className={k.animatedBackground} />
+              <div className={k.cornerAccent} />
+              <div className={k.content}>
+                <div className={k.iconTrendContainer}>
+                  <div className={`${k.iconContainer} ${card.iconBg}`}>
+                    <Icon className={k.icon} size={20} style={{ color: card.iconColor === "text-blue-600" ? "#2563eb" : card.iconColor === "text-green-600" ? "#16a34a" : "#f97316" }} />
                   </div>
-                  <span className={dashboardStyles.quickActionText}>
-                    Create Invoice
-                  </span>
-                </button>
-
-                <button
-                  onClick={() => navigate("/app/invoices")}
-                  className={`${dashboardStyles.quickActionButton} ${dashboardStyles.quickActionGray}`}
-                >
-                  <div
-                    className={`${dashboardStyles.quickActionIconContainer} ${dashboardStyles.quickActionIconGray}`}
+                  <span
+                    className={`${k.trendBadge} ${
+                      card.trendUp ? k.trendBadgePositive : k.trendBadgeNegative
+                    }`}
                   >
-                    <FileTextIcon className="w-4 h-4" />
-                  </div>
-                  <span className={dashboardStyles.quickActionText}>
-                    View All Invoices
+                    <span>{card.trendUp ? "↗" : "↘"}</span>
+                    {card.trend}
                   </span>
-                </button>
-
-                <button
-                  onClick={() => navigate("/app/business")}
-                  className={`${dashboardStyles.quickActionButton} ${dashboardStyles.quickActionGray}`}
-                >
-                  <div
-                    className={`${dashboardStyles.quickActionIconContainer} ${dashboardStyles.quickActionIconGray}`}
-                  >
-                    <svg
-                      className="w-4 h-4"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                    >
-                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                      <circle cx="12" cy="7" r="4" />
-                    </svg>
-                  </div>
-                  <span className={dashboardStyles.quickActionText}>
-                    Business Profile
-                  </span>
-                </button>
+                </div>
+                <div className={k.textContent}>
+                  <p className={k.title}>{card.label}</p>
+                  <h3 className={k.value}>{value}</h3>
+                  <p className={k.hint}>
+                    <span className={k.hintIcon}>⊙</span>
+                    {card.subtitle}
+                  </p>
+                </div>
               </div>
             </div>
+          );
+        })}
+      </div>
+
+      {/* Quick Stats + Recent Invoices */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Quick Stats */}
+        <div className={s.quickStatsCard}>
+          <h3 className={s.quickStatsTitle}>Quick Stats</h3>
+          <div className="space-y-4 mt-4">
+            <div className={s.quickStatsRow}>
+              <span className={s.quickStatsLabel}>Paid Rate</span>
+              <span className={s.quickStatsValue}>{paidRate}%</span>
+            </div>
+            <div className={s.quickStatsRow}>
+              <span className={s.quickStatsLabel}>Avg. Invoice</span>
+              <span className={s.quickStatsValue}>
+                ₹{avgInvoice.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+            <div className={s.quickStatsRow}>
+              <span className={s.quickStatsLabel}>Collection Eff.</span>
+              <span className={s.quickStatsValue}>{paidRate}%</span>
+            </div>
           </div>
-           
-                  <svg
-                    className="w-4 h-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M5 12h14m-7-7l7 7-7 7" />
-                  </svg>
-               
+
+          {/* Quick Actions */}
+          <div className="mt-6 pt-6 border-t border-blue-500/20">
+            <h4 className="text-sm font-medium text-blue-100 mb-3">
+              Quick Actions
+            </h4>
+            <div className={s.quickActionsContainer}>
+              <Link
+                to="/create-invoice"
+                className={`${s.quickActionButton} ${s.quickActionBlue}`}
+              >
+                <div className={`${s.quickActionIconContainer} ${s.quickActionIconBlue}`}>
+                  <FaFileInvoiceDollar size={16} />
+                </div>
+                <span className={s.quickActionText}>New Invoice</span>
+              </Link>
+              <Link
+                to="/business-profile"
+                className={`${s.quickActionButton} ${s.quickActionGray}`}
+              >
+                <div className={`${s.quickActionIconContainer} ${s.quickActionIconGray}`}>
+                  <FaIndianRupeeSign size={16} />
+                </div>
+                <span className={s.quickActionText}>Business Profile</span>
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        {/* Recent Invoices */}
+        <div className="lg:col-span-2 bg-white/80 backdrop-blur-xl rounded-2xl border border-gray-200/60 shadow-sm overflow-hidden">
+          <div className="px-6 py-5 border-b border-gray-200/60">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">
+                  Recent Invoices
+                </h3>
+                <p className="text-sm text-gray-600 mt-1">
+                  Latest 5 invoices from your account
+                </p>
+              </div>
+              <Link
+                to="/invoices"
+                className="mt-3 sm:mt-0 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-700 transition-colors duration-200"
+              >
+                View All <span>→</span>
+              </Link>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="px-6 py-12 text-center text-gray-400">
+              Loading invoices...
+            </div>
+          ) : invoices.length === 0 ? (
+            <div className="px-6 py-12 text-center">
+              <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-gray-100 flex items-center justify-center">
+                <FaFileInvoiceDollar className="text-gray-300" size={28} />
+              </div>
+              <p className="text-gray-500 font-medium">No invoices yet</p>
+              <Link
+                to="/create-invoice"
+                className="mt-2 inline-block text-blue-600 hover:text-blue-700 text-sm font-medium"
+              >
+                Create your first invoice →
+              </Link>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-gray-50/80 border-b border-gray-200/60">
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      CLIENT & ID
+                    </th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      AMOUNT
+                    </th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      STATUS
+                    </th>
+                    <th className="px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      DUE DATE
+                    </th>
+                    <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                      ACTIONS
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200/60">
+                  {invoices.slice(0, 5).map((inv) => (
+                    <tr
+                      key={inv._id}
+                      className="hover:bg-gray-50/50 transition-colors duration-150 group cursor-pointer"
+                      onClick={() => navigate(`/invoices/${inv._id}/preview`)}
+                    >
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-100 to-indigo-100 flex items-center justify-center text-blue-600 font-medium group-hover:scale-110 transition-transform duration-200">
+                            {(inv.clientName || "C").charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="font-medium text-gray-900 group-hover:text-blue-600 transition-colors">
+                              {inv.clientName || "—"}
+                            </div>
+                            <div className="text-sm text-gray-500">
+                              INV-
+                              {inv.invoiceNumber || inv._id?.slice(-6)}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 font-medium text-gray-900">
+                        ₹
+                        {(inv.totalAmount || 0).toLocaleString("en-IN", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span
+                          className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            inv.status === "paid"
+                              ? "bg-green-50 text-green-700"
+                              : inv.status === "pending"
+                              ? "bg-yellow-50 text-yellow-700"
+                              : "bg-red-50 text-red-700"
+                          }`}
+                        >
+                          {inv.status?.charAt(0).toUpperCase() +
+                            inv.status?.slice(1) || "Pending"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-900">
+                        {inv.dueDate
+                          ? new Date(inv.dueDate).toLocaleDateString("en-IN")
+                          : "—"}
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <button
+                          className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all duration-200"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/invoices/${inv._id}/preview`);
+                          }}
+                        >
+                          View <span>→</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

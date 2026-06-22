@@ -1,810 +1,472 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import { useParams, useLocation, useNavigate } from "react-router-dom";
-import { useAuth } from "@clerk/clerk-react";
+import { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { useSafeAuth } from "../hooks/useSafeAuth";
+import toast from "react-hot-toast";
+import jsPDF from "jspdf";
 import { invoicePreviewStyles } from "../assets/dummyStyles";
 
-const API_BASE = "http://localhost:4000";
-const PROFILE_ENDPOINT = `${API_BASE}/api/businessProfile/me`;
-const INVOICE_ENDPOINT = (id) => `${API_BASE}/api/invoice/${id}`;
+import { API_BASE } from "../config";
 
-function resolveImageUrl(url) {
-  if (!url) return null;
-  const s = String(url).trim();
-  // data URI -> return directly
-  if (s.startsWith("data:")) {
-    console.debug("[resolveImageUrl] data URI", s.slice(0, 40) + "...");
-    return s;
-  }
-
-  if (/localhost|127\.0\.0\.1/.test(s)) {
-    try {
-      const parsed = new URL(s);
-      const path =
-        parsed.pathname + (parsed.search || "") + (parsed.hash || "");
-      const resolved = `${API_BASE.replace(/\/+$/, "")}${path}`;
-      console.debug("[resolveImageUrl] rewritten localhost ->", {
-        orig: s,
-        resolved,
-      });
-      return resolved;
-    } catch (e) {
-      // fallback: strip host prefix
-      const path = s.replace(/^https?:\/\/[^/]+/, "");
-      const resolved = `${API_BASE.replace(/\/+$/, "")}${path}`;
-      console.debug("[resolveImageUrl] fallback rewrite localhost ->", {
-        orig: s,
-        resolved,
-      });
-      return resolved;
-    }
-  }
-
-  // absolute http(s) -> return as-is
-  if (/^https?:\/\//i.test(s)) {
-    console.debug("[resolveImageUrl] absolute URL", s);
-    return s;
-  }
-
-  // relative path like "/uploads/..." or "uploads/..."
-  const resolved = `${API_BASE.replace(/\/+$/, "")}/${s.replace(/^\/+/, "")}`;
-  console.debug("[resolveImageUrl] relative ->", { orig: s, resolved });
-  return resolved;
-}
-
-function readJSON(key, fallback = null) {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw);
-  } catch {
-    return fallback;
-  }
-}
-function writeJSON(key, val) {
-  try {
-    localStorage.setItem(key, JSON.stringify(val));
-  } catch {}
-}
-function getStoredInvoices() {
-  return readJSON("invoices_v1", []) || [];
-}
-
-const defaultProfile = {
-  businessName: "",
-  email: "",
-  address: "",
-  phone: "",
-  gst: "",
-  stampDataUrl: null,
-  signatureDataUrl: null,
-  logoDataUrl: null,
-  defaultTaxPercent: 18,
-  signatureName: "",
-  signatureTitle: "",
+const currencySymbol = (code) => {
+  const symbols = { INR: "₹", USD: "$", EUR: "€", GBP: "£" };
+  return symbols[code] || code + " ";
 };
 
-function currencyFmt(amount = 0, currency = "INR") {
-  try {
-    if (currency === "INR") {
-      return new Intl.NumberFormat("en-IN", {
-        style: "currency",
-        currency: "INR",
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2,
-      }).format(amount);
-    }
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `${currency} ${Number(amount || 0).toFixed(2)}`;
-  }
-}
-
-function formatDate(dateInput) {
-  if (!dateInput) return "—";
-  const d = dateInput instanceof Date ? dateInput : new Date(String(dateInput));
-  if (Number.isNaN(d.getTime())) return "—";
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const yyyy = d.getFullYear();
-  return `${dd}/${mm}/${yyyy}`;
-}
-
-function normalizeClient(raw) {
-  if (!raw) return { name: "", email: "", address: "", phone: "" };
-  if (typeof raw === "string")
-    return { name: raw, email: "", address: "", phone: "" };
-  if (typeof raw === "object") {
-    return {
-      name: raw.name ?? raw.company ?? raw.client ?? "",
-      email: raw.email ?? raw.emailAddress ?? "",
-      address: raw.address ?? raw.addr ?? raw.clientAddress ?? "",
-      phone: raw.phone ?? raw.contact ?? raw.mobile ?? "",
-    };
-  }
-  return { name: "", email: "", address: "", phone: "" };
-}
-
-/* ----------------- icons ----------------- */
-const PrintIcon = ({ className = "w-4 h-4" }) => (
-  <svg
-    className={className}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-  >
-    <path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
-    <path d="M6 14h12v8H6z" />
-  </svg>
-);
-const EditIcon = ({ className = "w-4 h-4" }) => (
-  <svg
-    className={className}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-  >
-    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-  </svg>
-);
-const ArrowLeftIcon = ({ className = "w-4 h-4" }) => (
-  <svg
-    className={className}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-  >
-    <path d="M19 12H5M12 19l-7-7 7-7" />
-  </svg>
-);
-
-/* ----------------- component ----------------- */
 export default function InvoicePreview() {
   const { id } = useParams();
-  const loc = useLocation();
   const navigate = useNavigate();
+  const { getToken } = useSafeAuth();
+  const [invoice, setInvoice] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  const { getToken, isSignedIn } = useAuth
-    ? useAuth()
-    : { getToken: null, isSignedIn: false };
-
-  const invoiceFromState = loc?.state?.invoice ?? null;
-  const [invoice, setInvoice] = useState(() =>
-    invoiceFromState ? invoiceFromState : null
-  );
-  const [loadingInvoice, setLoadingInvoice] = useState(
-    !invoiceFromState && Boolean(id)
-  );
-  const [invoiceError, setInvoiceError] = useState(null);
-
-  const [profile, setProfile] = useState(
-    () => readJSON("business_profile", defaultProfile) || defaultProfile
-  );
-  const [profileLoading, setProfileLoading] = useState(false);
-
-  const prevTitleRef = useRef(document.title);
-
-  const obtainToken = useCallback(async () => {
-    if (typeof getToken !== "function") return null;
-    try {
-      let token = await getToken({ template: "default" }).catch(() => null);
-      if (!token)
-        token = await getToken({ forceRefresh: true }).catch(() => null);
-      return token;
-    } catch {
-      return null;
-    }
-  }, [getToken]);
-
+  const apiBase = API_BASE; // eslint-disable-line no-unused-vars
 
   useEffect(() => {
-    let mounted = true;
-    async function fetchInvoice() {
-      if (!id || invoiceFromState) return;
-      setLoadingInvoice(true);
-      setInvoiceError(null);
+    const fetchInvoice = async () => {
       try {
-        const token = await obtainToken();
-        const headers = { Accept: "application/json" };
-        if (token) headers["Authorization"] = `Bearer ${token}`;
-
-        const res = await fetch(INVOICE_ENDPOINT(id), {
-          method: "GET",
-          headers,
+        const token = await getToken();
+        const res = await fetch(`${API_BASE}/api/invoices/${id}`, {
+          headers: { Authorization: `Bearer ${token}` },
         });
-        if (res.ok) {
-          const json = await res.json().catch(() => null);
-          const data = json?.data ?? json ?? null;
-          if (mounted && data) {
-            const normalized = {
-              ...data,
-              id: data._id ?? data.id ?? id,
-              items: Array.isArray(data.items)
-                ? data.items
-                : data.items
-                ? [...data.items]
-                : [],
-              invoiceNumber: data.invoiceNumber ?? data.invoiceNumber ?? "",
-              currency: data.currency || "INR",
-            };
-            setInvoice(normalized);
-            return;
-          }
-        } else {
-          console.warn("Failed to fetch invoice from server:", res.status);
-        }
+        if (!res.ok) throw new Error("Invoice not found");
+        const json = await res.json();
+        setInvoice(json?.data ?? json);
       } catch (err) {
-        console.warn("Error fetching invoice:", err);
+        toast.error(err.message);
+        navigate("/invoices");
       } finally {
-        if (!mounted) return;
-        const all = getStoredInvoices();
-        const found = all.find(
-          (x) => x && (x.id === id || x._id === id || x.invoiceNumber === id)
-        );
-        if (found) setInvoice(found);
-        else setInvoiceError("Invoice not found");
-        setLoadingInvoice(false);
+        setLoading(false);
       }
-    }
+    };
     fetchInvoice();
-    return () => {
-      mounted = false;
-    };
-  }, [id, invoiceFromState, obtainToken]);
+  }, [id, getToken, navigate]);
 
+  const fmtDate = (d) => {
+    if (!d) return "—";
+    const dt = new Date(d);
+    return dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  };
 
-  useEffect(() => {
-    let mounted = true;
-    async function fetchProfile() {
-      setProfileLoading(true);
-      try {
-        const token = await obtainToken();
-        const headers = { Accept: "application/json" };
-        if (token) headers["Authorization"] = `Bearer ${token}`;
+  const handlePrint = () => window.print();
 
-        const res = await fetch(PROFILE_ENDPOINT, { method: "GET", headers });
-        if (!res.ok) {
-          console.warn("Profile fetch returned non-ok:", res.status);
-          setProfileLoading(false);
-          return;
-        }
-        const json = await res.json().catch(() => null);
-        const data = json?.data ?? json ?? null;
-        if (mounted && data && typeof data === "object") {
-          const normalized = {
-            businessName:
-              data.businessName ?? data.name ?? defaultProfile.businessName,
-            email: data.email ?? defaultProfile.email,
-            address: data.address ?? defaultProfile.address,
-            phone: data.phone ?? defaultProfile.phone,
-            gst: data.gst ?? defaultProfile.gst,
-            stampDataUrl:
-              data.stampUrl ?? data.stampDataUrl ?? defaultProfile.stampDataUrl,
-            signatureDataUrl:
-              data.signatureUrl ??
-              data.signatureDataUrl ??
-              defaultProfile.signatureDataUrl,
-            logoDataUrl:
-              data.logoUrl ?? data.logoDataUrl ?? defaultProfile.logoDataUrl,
-            defaultTaxPercent: Number.isFinite(Number(data.defaultTaxPercent))
-              ? Number(data.defaultTaxPercent)
-              : defaultProfile.defaultTaxPercent,
-            signatureName:
-              data.signatureOwnerName ??
-              data.signatureName ??
-              defaultProfile.signatureName,
-            signatureTitle:
-              data.signatureOwnerTitle ??
-              data.signatureTitle ??
-              defaultProfile.signatureTitle,
-          };
-          setProfile(normalized);
-          try {
-            writeJSON("business_profile", normalized);
-          } catch {}
-        }
-      } catch (err) {
-        console.warn("Error fetching profile:", err);
-      } finally {
-        if (mounted) setProfileLoading(false);
+  const handleDownloadPDF = () => {
+    if (!invoice) return;
+    const doc = new jsPDF({ unit: "pt", format: "a4" });
+    const pw = doc.internal.pageSize.getWidth();
+    const margin = 40;
+    const rightX = pw - margin;
+    let y = 50;
+
+    const cur = currencySymbol(invoice.currency);
+    const items = invoice.items || [];
+    const sub = invoice.subtotal || items.reduce((s, i) => s + (i.qty || 1) * (i.unitPrice || 0), 0);
+    const taxAmt = invoice.tax || 0;
+    const total = invoice.total || sub + taxAmt;
+
+    // ── Top accent bar ──
+    doc.setFillColor(59, 130, 246);
+    doc.rect(0, 0, pw, 6, "F");
+    y = 40;
+
+    // ── INVOICE FROM (left) ──
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text("INVOICE FROM", margin, y);
+    y += 14;
+
+    doc.setFontSize(13);
+    doc.setTextColor(30, 30, 30);
+    doc.setFont(undefined, "bold");
+    doc.text(invoice.fromBusinessName || "—", margin, y);
+    y += 14;
+
+    doc.setFont(undefined, "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(80, 80, 80);
+    if (invoice.fromAddress) { doc.text(invoice.fromAddress, margin, y); y += 13; }
+
+    const fromMeta = [];
+    if (invoice.fromEmail) fromMeta.push(`Email: ${invoice.fromEmail}`);
+    if (invoice.fromPhone) fromMeta.push(`Phone: ${invoice.fromPhone}`);
+    if (invoice.fromGst) fromMeta.push(`GST: ${invoice.fromGst}`);
+    if (fromMeta.length) {
+      doc.setFontSize(9);
+      doc.text(fromMeta.join("   "), margin, y);
+      y += 13;
+    }
+    y += 10;
+
+    // ── INVOICE title (right) ──
+    doc.setFontSize(28);
+    doc.setTextColor(30, 30, 30);
+    doc.setFont(undefined, "bold");
+    doc.text("INVOICE", rightX, 60, { align: "right" });
+
+    doc.setFontSize(11);
+    doc.setTextColor(80, 80, 80);
+    doc.text(`#${invoice.invoiceNumber}`, rightX, 76, { align: "right" });
+
+    doc.setFont(undefined, "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(80, 80, 80);
+    let metaY = 92;
+    doc.text(`Invoice Date:  ${fmtDate(invoice.issueDate || invoice.createdAt)}`, rightX, metaY, { align: "right" });
+    metaY += 15;
+    doc.text(`Due Date:  ${fmtDate(invoice.dueDate) || "—"}`, rightX, metaY, { align: "right" });
+    metaY += 15;
+    doc.text(`Status:  ${(invoice.status || "draft").toUpperCase()}`, rightX, metaY, { align: "right" });
+
+    // ── Divider ──
+    y = Math.max(y, metaY) + 18;
+    doc.setDrawColor(220, 220, 220);
+    doc.setLineWidth(0.5);
+    doc.line(margin, y, rightX, y);
+    y += 20;
+
+    // ── BILL TO (left) ──
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text("BILL TO", margin, y);
+    y += 14;
+
+    doc.setFontSize(12);
+    doc.setTextColor(30, 30, 30);
+    doc.setFont(undefined, "bold");
+    doc.text(invoice.client?.name || "—", margin, y);
+    y += 14;
+
+    doc.setFont(undefined, "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(80, 80, 80);
+    if (invoice.client?.address) { doc.text(invoice.client.address, margin, y); y += 13; }
+    if (invoice.client?.email) { doc.text(invoice.client.email, margin, y); y += 13; }
+    if (invoice.client?.phone) { doc.text(invoice.client.phone, margin, y); y += 13; }
+
+    // ── PAYMENT DETAILS (right) ──
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text("PAYMENT DETAILS", pw / 2 + 20, y - (invoice.client?.phone ? 13 : invoice.client?.email ? 26 : invoice.client?.address ? 39 : 0));
+
+    doc.setFontSize(10);
+    doc.setTextColor(80, 80, 80);
+    doc.text(`Currency:  ${invoice.currency || "INR"}`, pw / 2 + 20, y - (invoice.client?.phone ? 0 : invoice.client?.email ? 13 : invoice.client?.address ? 26 : 0));
+
+    y += 18;
+    doc.setDrawColor(220, 220, 220);
+    doc.line(margin, y, rightX, y);
+    y += 20;
+
+    // ── Items table ──
+    const colDesc = margin;
+    const colQty = pw - 195;
+    const colUnit = pw - 140;
+    const colTotal = pw - margin;
+
+    // Table header
+    doc.setFillColor(245, 245, 245);
+    doc.rect(margin, y - 5, pw - 2 * margin, 22, "F");
+    doc.setFontSize(9);
+    doc.setTextColor(60, 60, 60);
+    doc.setFont(undefined, "bold");
+    doc.text("Description", colDesc + 5, y + 10);
+    doc.text("Qty", colQty + 10, y + 10, { align: "center" });
+    doc.text("Unit Price", colUnit + 15, y + 10, { align: "center" });
+    doc.text("Total", colTotal - 5, y + 10, { align: "right" });
+    y += 28;
+
+    // Table rows
+    doc.setFont(undefined, "normal");
+    doc.setFontSize(10);
+    items.forEach((item, i) => {
+      if (i % 2 === 0) {
+        doc.setFillColor(250, 250, 250);
+        doc.rect(margin, y - 5, pw - 2 * margin, 20, "F");
       }
+      doc.setTextColor(50, 50, 50);
+      doc.text(item.description || "—", colDesc + 5, y + 8);
+      doc.text(String(item.qty || 1), colQty + 10, y + 8, { align: "center" });
+      doc.text(`${cur}${(item.unitPrice || 0).toFixed(2)}`, colUnit + 15, y + 8, { align: "center" });
+      doc.text(`${cur}${((item.qty || 1) * (item.unitPrice || 0)).toFixed(2)}`, colTotal - 5, y + 8, { align: "right" });
+      y += 20;
+    });
+
+    doc.setDrawColor(220, 220, 220);
+    doc.line(margin, y, rightX, y);
+    y += 30;
+
+    // ── Signatures (left) + Totals (right) ──
+    // Signatures
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text("AUTHORIZED SIGNATURE", margin, y);
+    doc.text("COMPANY STAMP", margin + 170, y);
+    y += 40;
+
+    doc.setDrawColor(180, 180, 180);
+    doc.setLineWidth(0.3);
+    doc.line(margin, y, margin + 130, y);
+    doc.line(margin + 170, y, margin + 280, y);
+    y += 14;
+    doc.setFontSize(9);
+    doc.setTextColor(140, 140, 140);
+    if (invoice.signatureName) doc.text(invoice.signatureName, margin, y);
+    if (invoice.signatureTitle) doc.text(invoice.signatureTitle, margin, y + 12);
+
+    // Totals (right side)
+    let ty = y - 52;
+    const totalsX = pw - margin - 170;
+    const valX = rightX;
+
+    doc.setFontSize(10);
+    doc.setTextColor(80, 80, 80);
+    doc.setFont(undefined, "normal");
+    doc.text("Subtotal", totalsX, ty);
+    doc.text(`${cur}${sub.toFixed(2)}`, valX, ty, { align: "right" });
+    ty += 18;
+
+    if (taxAmt > 0) {
+      doc.text(`Tax (${invoice.taxPercent || 0}%)`, totalsX, ty);
+      doc.text(`${cur}${taxAmt.toFixed(2)}`, valX, ty, { align: "right" });
+      ty += 18;
     }
 
-    const stored = readJSON("business_profile", null);
-    if (!stored) fetchProfile();
-    return () => {
-      mounted = false;
-    };
-  }, [obtainToken]);
+    doc.setDrawColor(200, 200, 200);
+    doc.line(totalsX, ty - 4, valX, ty - 4);
+    ty += 10;
 
+    doc.setFontSize(13);
+    doc.setTextColor(30, 30, 30);
+    doc.setFont(undefined, "bold");
+    doc.text("Total Amount", totalsX, ty);
+    doc.setTextColor(59, 130, 246);
+    doc.text(`${cur}${total.toFixed(2)}`, valX, ty, { align: "right" });
 
-  useEffect(() => {
-    if (!invoice) return;
-    const invoiceNumber =
-      invoice.invoiceNumber || invoice.id || `invoice-${Date.now()}`;
-    const safe = `Invoice-${String(invoiceNumber).replace(
-      /[^\w\-_.() ]/g,
-      "_"
-    )}`;
-    const prev = prevTitleRef.current ?? document.title;
-    if (document.title !== safe) document.title = safe;
-    return () => {
-      try {
-        document.title = prev;
-      } catch {}
-    };
-  }, [invoice]);
+    // ── Thank you ──
+    y += 40;
+    doc.setFont(undefined, "italic");
+    doc.setFontSize(10);
+    doc.setTextColor(120, 120, 120);
+    doc.text("Thank you for your business!", pw / 2, y, { align: "center" });
+    y += 16;
 
+    // ── Footer ──
+    doc.setFontSize(8);
+    doc.setTextColor(160, 160, 160);
+    doc.text(`Invoice generated by InvoiceAI • ${fmtDate(new Date())}`, pw / 2, y, { align: "center" });
 
-  const handlePrint = useCallback(() => {
-    const invoiceNumber =
-      (invoice && (invoice.invoiceNumber || invoice.id)) ||
-      `invoice-${Date.now()}`;
-    const safe = `Invoice-${String(invoiceNumber).replace(
-      /[^\w\-_.() ]/g,
-      "_"
-    )}`;
+    doc.save(`Invoice-${invoice.invoiceNumber || invoice._id}.pdf`);
+    toast.success("PDF downloaded!");
+  };
 
-    const prevTitle = document.title;
-    document.title = safe;
-    window.print();
+  const statusColor = {
+    draft: "bg-gray-100 text-gray-700",
+    unpaid: "bg-amber-100 text-amber-700",
+    paid: "bg-emerald-100 text-emerald-700",
+    overdue: "bg-red-100 text-red-700",
+  };
 
-    // Restore title after a delay
-    setTimeout(() => {
-      document.title = prevTitle;
-    }, 500);
-  }, [invoice]);
-
-  if (!invoice && (loadingInvoice || profileLoading)) {
-    return <div className="p-6">Loading…</div>;
-  }
-  if (!invoice) {
+  if (loading) {
     return (
-      <div className={invoicePreviewStyles.pageContainer}>
-        <div className={invoicePreviewStyles.emptyStateContainer}>
-          <div className={invoicePreviewStyles.emptyStateCard}>
-            <div className={invoicePreviewStyles.emptyStateIconContainer}>
-              <svg
-                className={invoicePreviewStyles.emptyStateIcon}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <line x1="15" y1="9" x2="9" y2="15" />
-                <line x1="9" y1="9" x2="15" y2="15" />
-              </svg>
-            </div>
-            <h3 className={invoicePreviewStyles.emptyStateTitle}>
-              Invoice Not Found
-            </h3>
-            <p className={invoicePreviewStyles.emptyStateMessage}>
-              The invoice you're looking for doesn't exist or may have been
-              deleted.
-            </p>
-            <div className="mt-6">
-              <button
-                onClick={() => navigate(-1)}
-                className={invoicePreviewStyles.emptyStateButton}
-              >
-                <ArrowLeftIcon className="w-4 h-4" /> Back to Invoices
-              </button>
-            </div>
-          </div>
-        </div>
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="animate-spin h-10 w-10 border-4 border-blue-500 border-t-transparent rounded-full" />
       </div>
     );
   }
 
-  const items = (
-    invoice.items && Array.isArray(invoice.items) ? invoice.items : []
-  ).filter(Boolean);
-  const subtotal = items.reduce(
-    (s, it) => s + Number(it.qty || 0) * Number(it.unitPrice || 0),
-    0
-  );
-  const taxPercent = Number(
-    invoice.taxPercent ?? profile.defaultTaxPercent ?? 18
-  );
-  const tax = (subtotal * taxPercent) / 100;
-  const total = subtotal + tax;
+  if (!invoice) return null;
 
-  const logo = resolveImageUrl(
-    invoice.logoDataUrl ?? profile.logoDataUrl ?? null
-  );
-  const stamp = resolveImageUrl(
-    invoice.stampDataUrl ?? profile.stampDataUrl ?? null
-  );
-  const signature = resolveImageUrl(
-    invoice.signatureDataUrl ?? profile.signatureDataUrl ?? null
-  );
-
-  const signatureName = invoice.signatureName ?? profile.signatureName ?? "";
-  const signatureTitle = invoice.signatureTitle ?? profile.signatureTitle ?? "";
-
-  const client = normalizeClient(invoice.client);
-  const invoiceCurrency = invoice.currency || "INR";
-
+  const items = invoice.items || [];
+  const sub = invoice.subtotal || items.reduce((s, i) => s + (i.qty || 1) * (i.unitPrice || 0), 0);
+  const taxAmt = invoice.tax || 0;
+  const total = invoice.total || sub + taxAmt;
+  const cur = currencySymbol(invoice.currency);
 
   return (
-    <div className={invoicePreviewStyles.pageContainer}>
-      <div className={invoicePreviewStyles.container}>
-        {/* Header Actions */}
-        <div
-          className={`${invoicePreviewStyles.headerContainer} ${invoicePreviewStyles.noPrint}`}
+    <div className="max-w-5xl mx-auto p-4 sm:p-6">
+      {/* Action bar */}
+      <div className="flex items-center justify-between mb-6 no-print">
+        <button
+          onClick={() => navigate(-1)}
+          className="flex items-center gap-2 text-gray-600 hover:text-gray-900 transition-colors"
         >
-          <div>
-            <h1 className={invoicePreviewStyles.headerTitle}>
-              Invoice Preview
-            </h1>
-            <p className={invoicePreviewStyles.headerSubtitle}>
-              Review invoice{" "}
-              <span className={invoicePreviewStyles.headerInvoiceNumber}>
-                #{invoice.invoiceNumber || invoice.id}
-              </span>
-            </p>
-          </div>
-
-          <div className={invoicePreviewStyles.headerActions}>
-            <button
-              onClick={() =>
-                navigate(`/app/invoices/${invoice.id}/edit`, {
-                  state: { invoice },
-                })
-              }
-              className={invoicePreviewStyles.editInvoiceButton}
-            >
-              <EditIcon className="w-4 h-4" /> Edit Invoice
-            </button>
-
-            <button
-              onClick={handlePrint}
-              className={invoicePreviewStyles.printButton}
-            >
-              <PrintIcon className="w-4 h-4" /> Print / Save as PDF
-            </button>
-          </div>
-        </div>
-
-        {/* Printable invoice area */}
-        <div id="print-area" className={invoicePreviewStyles.printArea}>
-          <div className={invoicePreviewStyles.printHeader}>
-            <div className={invoicePreviewStyles.companyInfo}>
-              {logo && (
-                <img
-                  src={logo}
-                  alt="Company Logo"
-                  className={invoicePreviewStyles.logo}
-                  onError={(e) => {
-                    e.currentTarget.style.display = "none";
-                  }}
-                />
-              )}
-              <div>
-                <div className={invoicePreviewStyles.invoiceFromLabel}>
-                  Invoice From
-                </div>
-                <div className={invoicePreviewStyles.companyName}>
-                  {invoice.fromBusinessName || profile.businessName || "—"}
-                </div>
-                <div className={invoicePreviewStyles.companyAddress}>
-                  {invoice.fromAddress || profile.address || "—"}
-                </div>
-                <div className={invoicePreviewStyles.companyContact}>
-                  {invoice.fromEmail || profile.email ? (
-                    <div>
-                      <strong>Email:</strong>{" "}
-                      {invoice.fromEmail || profile.email}
-                    </div>
-                  ) : null}
-                  {invoice.fromPhone || profile.phone ? (
-                    <div>
-                      <strong>Phone:</strong>{" "}
-                      {invoice.fromPhone || profile.phone}
-                    </div>
-                  ) : null}
-                  {invoice.fromGst || profile.gst ? (
-                    <div>
-                      <strong>GST:</strong> {invoice.fromGst || profile.gst}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-
-            <div className={invoicePreviewStyles.invoiceInfo}>
-              <div className={invoicePreviewStyles.invoiceTitle}>INVOICE</div>
-              <div className={invoicePreviewStyles.invoiceNumber}>
-                #{invoice.invoiceNumber || invoice.id}
-              </div>
-
-              <div className={invoicePreviewStyles.invoiceDetails}>
-                <div className={invoicePreviewStyles.invoiceDetailRow}>
-                  <span className={invoicePreviewStyles.invoiceDetailLabel}>
-                    Invoice Date:
-                  </span>
-                  <span className={invoicePreviewStyles.invoiceDetailValue}>
-                    {invoice.issueDate ? formatDate(invoice.issueDate) : "—"}
-                  </span>
-                </div>
-                <div className={invoicePreviewStyles.invoiceDetailRow}>
-                  <span className={invoicePreviewStyles.invoiceDetailLabel}>
-                    Due Date:
-                  </span>
-                  <span className={invoicePreviewStyles.invoiceDetailValue}>
-                    {invoice.dueDate ? formatDate(invoice.dueDate) : "—"}
-                  </span>
-                </div>
-                <div className={invoicePreviewStyles.invoiceDetailRow}>
-                  <span className={invoicePreviewStyles.invoiceDetailLabel}>
-                    Status:
-                  </span>
-                  <span
-                    className={`${invoicePreviewStyles.invoiceDetailValue} ${
-                      invoice.status === "paid"
-                        ? invoicePreviewStyles.statusPaid
-                        : invoice.status === "unpaid"
-                        ? invoicePreviewStyles.statusUnpaid
-                        : invoice.status === "overdue"
-                        ? invoicePreviewStyles.statusOverdue
-                        : invoicePreviewStyles.statusDraft
-                    }`}
-                  >
-                    {invoice.status
-                      ? invoice.status.charAt(0).toUpperCase() +
-                        invoice.status.slice(1)
-                      : "Draft"}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Client & Payment Details */}
-          <div className={invoicePreviewStyles.section}>
-            <div className={invoicePreviewStyles.flexContainer}>
-              <div className="flex-1">
-                <div className={invoicePreviewStyles.billToLabel}>Bill To</div>
-                <div className={invoicePreviewStyles.clientDetails}>
-                  <div className={invoicePreviewStyles.clientName}>
-                    {client.name || "Client Name"}
-                  </div>
-                  {client.address && (
-                    <div className={invoicePreviewStyles.clientText}>
-                      {client.address}
-                    </div>
-                  )}
-                  {client.email && (
-                    <div className={invoicePreviewStyles.clientText}>
-                      {client.email}
-                    </div>
-                  )}
-                  {client.phone && (
-                    <div className={invoicePreviewStyles.clientText}>
-                      {client.phone}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="flex-1">
-                <div className={invoicePreviewStyles.paymentDetailsLabel}>
-                  Payment Details
-                </div>
-                <div className={invoicePreviewStyles.paymentDetails}>
-                  <div className={invoicePreviewStyles.paymentDetailRow}>
-                    <span className={invoicePreviewStyles.paymentDetailLabel}>
-                      Currency:
-                    </span>
-                    <span className={invoicePreviewStyles.paymentDetailValue}>
-                      {invoiceCurrency}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Items Table */}
-          <div className={invoicePreviewStyles.section}>
-            <div className="overflow-x-auto">
-              <table className={invoicePreviewStyles.table}>
-                <thead>
-                  <tr>
-                    <th style={{ width: "50%", minWidth: "150px" }}>
-                      Description
-                    </th>
-                    <th
-                      style={{
-                        width: "15%",
-                        textAlign: "right",
-                        minWidth: "70px",
-                      }}
-                    >
-                      Quantity
-                    </th>
-                    <th
-                      style={{
-                        width: "20%",
-                        textAlign: "right",
-                        minWidth: "90px",
-                      }}
-                    >
-                      Unit Price
-                    </th>
-                    <th
-                      style={{
-                        width: "15%",
-                        textAlign: "right",
-                        minWidth: "80px",
-                      }}
-                    >
-                      Total
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.length ? (
-                    items.map((it, idx) => (
-                      <tr key={it.id || idx}>
-                        <td className={invoicePreviewStyles.tableCell}>
-                          {it.description || "Item Description"}
-                        </td>
-                        <td style={{ textAlign: "right" }}>{it.qty || 0}</td>
-                        <td style={{ textAlign: "right" }}>
-                          {currencyFmt(it.unitPrice, invoiceCurrency)}
-                        </td>
-                        <td style={{ textAlign: "right", fontWeight: "600" }}>
-                          {currencyFmt(
-                            Number(it.qty || 0) * Number(it.unitPrice || 0),
-                            invoiceCurrency
-                          )}
-                        </td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td
-                        colSpan="4"
-                        style={{
-                          textAlign: "center",
-                          padding: "20px",
-                          color: "#6b7280",
-                        }}
-                      >
-                        No items added to this invoice
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Notes */}
-          {invoice.notes && (
-            <div className={invoicePreviewStyles.section}>
-              <div className={invoicePreviewStyles.notesLabel}>Notes</div>
-              <div className={invoicePreviewStyles.notesContent}>
-                {invoice.notes}
-              </div>
-            </div>
-          )}
-
-          {/* Totals, Signature, Stamp */}
-          <div className={invoicePreviewStyles.section}>
-            <div className={invoicePreviewStyles.flexContainer}>
-              <div className="flex-1">
-                <div className={invoicePreviewStyles.signatureLabel}>
-                  Authorized Signature
-                </div>
-                {signature ? (
-                  <div className={invoicePreviewStyles.signatureContainer}>
-                    <img
-                      src={signature}
-                      alt="Authorized Signature"
-                      className={invoicePreviewStyles.signatureImage}
-                      onError={(e) => {
-                        e.currentTarget.style.display = "none";
-                      }}
-                    />
-                    {(signatureName || signatureTitle) && (
-                      <div className="mt-2 text-sm text-gray-700">
-                        <div className={invoicePreviewStyles.signatureName}>
-                          {signatureName}
-                        </div>
-                        {signatureTitle && (
-                          <div className={invoicePreviewStyles.signatureTitle}>
-                            {signatureTitle}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className={invoicePreviewStyles.placeholderContainer}>
-                    No Signature
-                  </div>
-                )}
-              </div>
-
-              <div className="flex-1 text-center">
-                <div className={invoicePreviewStyles.stampLabel}>
-                  Company Stamp
-                </div>
-                {stamp ? (
-                  <img
-                    src={stamp}
-                    alt="Company Stamp"
-                    className={invoicePreviewStyles.stampImage}
-                    onError={(e) => {
-                      e.currentTarget.style.display = "none";
-                    }}
-                  />
-                ) : (
-                  <div className={invoicePreviewStyles.placeholderContainer}>
-                    No Stamp
-                  </div>
-                )}
-              </div>
-
-              <div className="flex-1">
-                <div className={invoicePreviewStyles.totalsContainer}>
-                  <div className="space-y-2">
-                    <div className={invoicePreviewStyles.totalsRow}>
-                      <span className={invoicePreviewStyles.totalsLabel}>
-                        Subtotal
-                      </span>
-                      <span className={invoicePreviewStyles.totalsValue}>
-                        {currencyFmt(subtotal, invoiceCurrency)}
-                      </span>
-                    </div>
-                    <div className={invoicePreviewStyles.totalsRow}>
-                      <span className={invoicePreviewStyles.totalsLabel}>
-                        Tax ({taxPercent}%)
-                      </span>
-                      <span className={invoicePreviewStyles.totalsValue}>
-                        {currencyFmt(tax, invoiceCurrency)}
-                      </span>
-                    </div>
-                    <div className={invoicePreviewStyles.totalDivider}>
-                      <div className={invoicePreviewStyles.totalsRow}>
-                        <span className={invoicePreviewStyles.totalAmountLabel}>
-                          Total Amount
-                        </span>
-                        <span className={invoicePreviewStyles.totalAmountValue}>
-                          {currencyFmt(total, invoiceCurrency)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className={invoicePreviewStyles.footer}>
-            <div className={invoicePreviewStyles.footerText}>
-              {invoice.terms ||
-                invoice.footnote ||
-                "Thank you for your business. We appreciate your trust in our services."}
-            </div>
-            <div className={invoicePreviewStyles.footerSubText}>
-              Invoice generated by InvoiceAI • {formatDate(new Date())}
-            </div>
-          </div>
+          ← Back
+        </button>
+        <div className="flex gap-3">
+          <button onClick={handlePrint} className={invoicePreviewStyles.printButton}>
+            🖨️ Print
+          </button>
+          <button onClick={handleDownloadPDF} className={invoicePreviewStyles.downloadButton}>
+            📥 Download PDF
+          </button>
         </div>
       </div>
+
+      {/* Invoice paper */}
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-6 sm:p-10 print:shadow-none">
+
+        {/* ── INVOICE FROM + INVOICE header ── */}
+        <div className="flex flex-col sm:flex-row justify-between gap-8 mb-8">
+          {/* FROM section */}
+          <div className="flex-1">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-200 pb-1">
+              Invoice From
+            </h3>
+            <div className="space-y-1">
+              <p className="text-base font-bold text-gray-900">{invoice.fromBusinessName || "—"}</p>
+              <p className="text-sm text-gray-600">{invoice.fromAddress || "—"}</p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-sm text-gray-600">
+                {invoice.fromEmail && <span>✉ {invoice.fromEmail}</span>}
+                {invoice.fromPhone && <span>📞 {invoice.fromPhone}</span>}
+                {invoice.fromGst && <span>GST: {invoice.fromGst}</span>}
+              </div>
+            </div>
+          </div>
+
+          {/* INVOICE title + meta */}
+          <div className="text-right flex-shrink-0">
+            <h1 className="text-4xl font-extrabold text-gray-900 tracking-tight mb-1">INVOICE</h1>
+            <p className="text-lg font-semibold text-gray-700 mb-4">#{invoice.invoiceNumber}</p>
+
+            <div className="space-y-1 text-sm text-gray-600">
+              <p>
+                <span className="font-medium text-gray-800">Invoice Date: </span>
+                {fmtDate(invoice.issueDate || invoice.createdAt)}
+              </p>
+              {invoice.dueDate && (
+                <p>
+                  <span className="font-medium text-gray-800">Due Date: </span>
+                  {fmtDate(invoice.dueDate)}
+                </p>
+              )}
+              <div className="mt-2">
+                <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold capitalize ${statusColor[invoice.status] || ""}`}>
+                  {invoice.status}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── BILL TO + PAYMENT DETAILS ── */}
+        <div className="flex flex-col sm:flex-row justify-between gap-8 mb-8">
+          <div className="flex-1">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-200 pb-1">
+              Bill To
+            </h3>
+            <div className="space-y-1">
+              <p className="text-base font-bold text-gray-900">{invoice.client?.name || "—"}</p>
+              <p className="text-sm text-gray-600">{invoice.client?.address || "—"}</p>
+              {invoice.client?.email && <p className="text-sm text-gray-600">✉ {invoice.client.email}</p>}
+              {invoice.client?.phone && <p className="text-sm text-gray-600">📞 {invoice.client.phone}</p>}
+            </div>
+          </div>
+
+          <div className="flex-shrink-0 text-right">
+            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3 border-b border-gray-200 pb-1">
+              Payment Details
+            </h3>
+            <div className="space-y-1 text-sm text-gray-600">
+              <p><span className="font-medium text-gray-800">Currency: </span>{invoice.currency || "INR"}</p>
+              <p><span className="font-medium text-gray-800">Payment Status: </span><span className="capitalize">{invoice.status}</span></p>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Items table ── */}
+        <div className="mb-8">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-y border-gray-200">
+                  <th className="text-left py-3 px-4 font-semibold text-gray-700">Description</th>
+                  <th className="text-center py-3 px-4 font-semibold text-gray-700 w-20">Quantity</th>
+                  <th className="text-right py-3 px-4 font-semibold text-gray-700 w-28">Unit Price</th>
+                  <th className="text-right py-3 px-4 font-semibold text-gray-700 w-28">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item, i) => (
+                  <tr key={item.id || i} className="border-b border-gray-100 hover:bg-gray-50/50">
+                    <td className="py-3 px-4 text-gray-800">{item.description || "—"}</td>
+                    <td className="py-3 px-4 text-center text-gray-600">{item.qty || 1}</td>
+                    <td className="py-3 px-4 text-right text-gray-600">{cur}{(item.unitPrice || 0).toFixed(2)}</td>
+                    <td className="py-3 px-4 text-right font-medium text-gray-800">
+                      {cur}{((item.qty || 1) * (item.unitPrice || 0)).toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+                {items.length === 0 && (
+                  <tr>
+                    <td colSpan={4} className="py-6 text-center text-gray-400 italic">No items</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* ── Signatures + Totals ── */}
+        <div className="flex flex-col sm:flex-row justify-between gap-8 mb-8">
+          {/* Signature / Stamp placeholders */}
+          <div className="flex gap-10">
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-6">Authorized Signature</p>
+              {invoice.signatureDataUrl ? (
+                <img src={invoice.signatureDataUrl} alt="Signature" className="h-12 object-contain" />
+              ) : (
+                <div className="w-40 border-b border-gray-300" />
+              )}
+              {invoice.signatureName && (
+                <p className="text-sm text-gray-700 mt-2">{invoice.signatureName}</p>
+              )}
+              {invoice.signatureTitle && (
+                <p className="text-xs text-gray-500">{invoice.signatureTitle}</p>
+              )}
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-6">Company Stamp</p>
+              {invoice.stampDataUrl ? (
+                <img src={invoice.stampDataUrl} alt="Stamp" className="h-16 object-contain" />
+              ) : (
+                <div className="w-32 h-20 border border-dashed border-gray-300 rounded" />
+              )}
+            </div>
+          </div>
+
+          {/* Totals */}
+          <div className="w-full sm:w-64">
+            <div className="flex justify-between py-2 border-b border-gray-200">
+              <span className="text-gray-600">Subtotal</span>
+              <span className="font-medium text-gray-800">{cur}{sub.toFixed(2)}</span>
+            </div>
+            {taxAmt > 0 && (
+              <div className="flex justify-between py-2 border-b border-gray-200">
+                <span className="text-gray-600">Tax ({invoice.taxPercent || 0}%)</span>
+                <span className="font-medium text-gray-800">{cur}{taxAmt.toFixed(2)}</span>
+              </div>
+            )}
+            <div className="flex justify-between py-3 text-lg font-bold">
+              <span className="text-gray-900">Total Amount</span>
+              <span className="text-blue-600">{cur}{total.toFixed(2)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Thank you note ── */}
+        {invoice.notes && (
+          <div className="mb-6 p-4 bg-gray-50 rounded-lg border border-gray-100">
+            <p className="text-sm text-gray-500 uppercase tracking-wide mb-1">Notes</p>
+            <p className="text-gray-600 text-sm">{invoice.notes}</p>
+          </div>
+        )}
+
+        <p className="text-sm text-gray-500 italic text-center">Thank you for your business!</p>
+      </div>
+
+      {/* Footer */}
+      <p className="text-center text-xs text-gray-400 mt-6">
+        Invoice generated by InvoiceAI • {fmtDate(new Date())}
+      </p>
     </div>
   );
 }

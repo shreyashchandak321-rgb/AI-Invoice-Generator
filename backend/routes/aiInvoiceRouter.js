@@ -1,9 +1,19 @@
+const express = require("express");
+const { GoogleGenAI } = require("@google/genai");
+const router = express.Router();
+
+// ── Gemini setup ─────────────────────────────────────────────────────────
+
+const API_KEY = process.env.GEMINI_API_KEY || "";
 const ai = new GoogleGenAI({ apiKey: API_KEY });
+
 const MODEL_CANDIDATES = [
   "gemini-2.5-flash",
   "gemini-2.0-flash",
   "gemini-2.0",
 ];
+
+// ── Prompt builder ───────────────────────────────────────────────────────
 
 function buildInvoicePrompt(promptText) {
   const invoiceTemplate = {
@@ -14,10 +24,11 @@ function buildInvoicePrompt(promptText) {
     fromEmail: "",
     fromAddress: "",
     fromPhone: "",
+    fromGst: "",
     client: { name: "", email: "", address: "", phone: "" },
     items: [{ id: "1", description: "", qty: 1, unitPrice: 0 }],
     taxPercent: 18,
-    notes: ""
+    notes: "",
   };
 
   return `
@@ -27,6 +38,7 @@ Task:
   - Analyze the user's input text and produce a valid JSON object only (no explanatory text).
   - The JSON MUST match the schema below (include all fields even if empty).
   - Ensure all dates are ISO 'YYYY-MM-DD' strings and numeric fields are numbers.
+  - Items array must have at least one item with id, description, qty, unitPrice.
 
 Schema:
 ${JSON.stringify(invoiceTemplate, null, 2)}
@@ -37,6 +49,8 @@ ${promptText}
 Output: valid JSON only (no surrounding code fences, no commentary).
 `;
 }
+
+// ── Model caller ─────────────────────────────────────────────────────────
 
 async function tryGenerateWithModel(modelName, prompt) {
   const response = await ai.models.generateContent({
@@ -54,13 +68,11 @@ async function tryGenerateWithModel(modelName, prompt) {
       Array.isArray(response.output[0].content) &&
       response.output[0].content[0] &&
       response.output[0].content[0].text) ||
-    // alternate: response?.outputs?.[0]?.text
     (response &&
       response.outputs &&
       Array.isArray(response.outputs) &&
       response.outputs[0] &&
       (response.outputs[0].text || response.outputs[0].content)) ||
-    // fallback: JSON-stringify the whole response (so we at least have something)
     null;
 
   if (!text && response && Array.isArray(response.outputs)) {
@@ -93,8 +105,27 @@ async function tryGenerateWithModel(modelName, prompt) {
   return { text: String(text).trim(), modelName };
 }
 
+// ── Route ────────────────────────────────────────────────────────────────
 
-      let lastErr = null;
+router.post("/generate", clerkAuth, async (req, res) => {
+  try {
+    const { prompt } = req.body || {};
+    if (!prompt || !String(prompt).trim()) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Prompt is required" });
+    }
+
+    if (!API_KEY) {
+      return res.status(500).json({
+        success: false,
+        message: "Gemini API key not configured",
+      });
+    }
+
+    const fullPrompt = buildInvoicePrompt(prompt);
+
+    let lastErr = null;
     let lastText = null;
     let usedModel = null;
 
@@ -119,7 +150,7 @@ async function tryGenerateWithModel(modelName, prompt) {
       return res.status(502).json({
         success: false,
         message: "AI generation failed",
-        detail: errMsg
+        detail: errMsg,
       });
     }
 
@@ -129,12 +160,39 @@ async function tryGenerateWithModel(modelName, prompt) {
     if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
       console.error("AI response did not contain JSON object:", {
         usedModel,
-        text
+        text,
       });
       return res.status(502).json({
         success: false,
         message: "AI returned malformed response (no JSON found)",
         raw: text,
-        model: usedModel
+        model: usedModel,
       });
     }
+
+    const jsonStr = text.substring(firstBrace, lastBrace + 1);
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (parseErr) {
+      console.error("Failed to parse AI JSON:", parseErr.message, jsonStr);
+      return res.status(502).json({
+        success: false,
+        message: "AI returned invalid JSON",
+        raw: jsonStr,
+        model: usedModel,
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: parsed,
+      model: usedModel,
+    });
+  } catch (err) {
+    console.error("AI generate error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+module.exports = router;
